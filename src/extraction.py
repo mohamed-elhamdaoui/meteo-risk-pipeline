@@ -1,4 +1,4 @@
-from pprint import pprint
+import json
 
 import pandas as pd
 import requests
@@ -6,28 +6,32 @@ import requests
 
 df = pd.read_csv("data/Bronze/ma.csv")
 
-city = df.iloc[0]
-latitude = city["lat"]
-longitude = city["lng"]
+weather_data = {}
 
-params = {
-    "latitude": latitude,
-    "longitude": longitude,
-    "daily": [
-        "temperature_2m_max",
-        "temperature_2m_min",
-        "precipitation_sum",
-        "precipitation_probability_max",
-        "wind_speed_10m_max",
-        "wind_gusts_10m_max",
-        "weather_code",
-    ],
-    "forecast_days": 7,
-    "timezone": "Africa/Casablanca",
-}
+for _, city in df.iterrows():
+    latitude = city["lat"]
+    longitude = city["lng"]
 
-response = requests.get("https://api.open-meteo.com/v1/forecast", params=params)
+    params = {
+        "latitude": latitude,
+        "longitude": longitude,
+        "daily": [
+            "temperature_2m_max",
+            "temperature_2m_min",
+            "precipitation_sum",
+            "precipitation_probability_max",
+            "wind_speed_10m_max",
+            "wind_gusts_10m_max",
+            "weather_code",
+        ],
+        "forecast_days": 7,
+        "timezone": "Africa/Casablanca",
+    }
 
-print(city["city"])
-print(response.status_code)
-pprint(response.json())
+    response = requests.get("https://api.open-meteo.com/v1/forecast", params=params)
+    weather_data[city["city"]] = response.json()
+
+with open("data/Bronze/weather_data.json", "w", encoding="utf-8") as file:
+    json.dump(weather_data, file, ensure_ascii=False, indent=4)
+
+print(f"Weather data collected for {len(weather_data)} cities.")
