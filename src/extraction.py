@@ -28,8 +28,21 @@ for _, city in df.iterrows():
         "timezone": "Africa/Casablanca",
     }
 
-    response = requests.get("https://api.open-meteo.com/v1/forecast", params=params)
-    weather_data[city["city"]] = response.json()
+    try:
+        response = requests.get(
+            "https://api.open-meteo.com/v1/forecast",
+            params=params,
+            timeout=10,
+        )
+        response.raise_for_status()
+
+        weather_data[city["city"]] = response.json()
+
+    except requests.exceptions.Timeout:
+        print(f"Timeout for {city['city']}")
+
+    except requests.exceptions.RequestException as error:
+        print(f"API error for {city['city']}: {error}")
 
 with open("data/Bronze/weather_data.json", "w", encoding="utf-8") as file:
     json.dump(weather_data, file, ensure_ascii=False, indent=4)
