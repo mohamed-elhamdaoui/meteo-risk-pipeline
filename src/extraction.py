@@ -6,45 +6,46 @@ import requests
 
 df = pd.read_csv("data/Bronze/ma.csv")
 
-weather_data = {}
+latitudes = df["lat"].tolist()
+longitudes = df["lng"].tolist()
 
-for _, city in df.iterrows():
-    latitude = city["lat"]
-    longitude = city["lng"]
+params = {
+    "latitude": ",".join(map(str, latitudes)),
+    "longitude": ",".join(map(str, longitudes)),
+    "daily": [
+        "temperature_2m_max",
+        "temperature_2m_min",
+        "precipitation_sum",
+        "precipitation_probability_max",
+        "wind_speed_10m_max",
+        "wind_gusts_10m_max",
+        "weather_code",
+    ],
+    "forecast_days": 7,
+    "timezone": "Africa/Casablanca",
+}
 
-    params = {
-        "latitude": latitude,
-        "longitude": longitude,
-        "daily": [
-            "temperature_2m_max",
-            "temperature_2m_min",
-            "precipitation_sum",
-            "precipitation_probability_max",
-            "wind_speed_10m_max",
-            "wind_gusts_10m_max",
-            "weather_code",
-        ],
-        "forecast_days": 7,
-        "timezone": "Africa/Casablanca",
-    }
+try:
+    response = requests.get(
+        "https://api.open-meteo.com/v1/forecast",
+        params=params,
+        timeout=30,
+    )
+    response.raise_for_status()
 
-    try:
-        response = requests.get(
-            "https://api.open-meteo.com/v1/forecast",
-            params=params,
-            timeout=10,
-        )
-        response.raise_for_status()
+    responses = response.json()
+    weather_data = {}
 
-        weather_data[city["city"]] = response.json()
+    for i, city in df.iterrows():
+        weather_data[city["city"]] = responses[i]
 
-    except requests.exceptions.Timeout:
-        print(f"Timeout for {city['city']}")
+    with open("data/Bronze/weather_data.json", "w", encoding="utf-8") as file:
+        json.dump(weather_data, file, ensure_ascii=False, indent=4)
 
-    except requests.exceptions.RequestException as error:
-        print(f"API error for {city['city']}: {error}")
+    print(f"Weather data collected for {len(weather_data)} cities.")
 
-with open("data/Bronze/weather_data.json", "w", encoding="utf-8") as file:
-    json.dump(weather_data, file, ensure_ascii=False, indent=4)
+except requests.exceptions.Timeout:
+    print("Timeout: the API took too long to respond.")
 
-print(f"Weather data collected for {len(weather_data)} cities.")
+except requests.exceptions.RequestException as error:
+    print(f"API error: {error}")
