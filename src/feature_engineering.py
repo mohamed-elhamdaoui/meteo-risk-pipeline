@@ -2,7 +2,7 @@ import pandas as pd
 
 
 def load_silver(path="data/silver/weather_clean.csv"):
-    df = pd.read_csv(path)
+    df = pd.read_csv(path, encoding="utf-8")
     df["date"] = pd.to_datetime(df["date"])
     return df
 
@@ -83,17 +83,13 @@ def compute_risk_score(row):
     precip_score = linear_score(row["precipitation"], low=1, high=50)
     wind_score = linear_score(row["wind_gusts_max"], low=30, high=90)
 
-    final_score = (
-        precip_score * 0.40
-        + wind_score * 0.35
-        + temp_score * 0.25
-    )
+    final_score = precip_score * 0.40 + wind_score * 0.35 + temp_score * 0.25
 
     return round(final_score, 1)
 
 
 def add_features(df):
-    
+
     df["temp_category"] = df["temperature_max"].apply(categorize_temperature)
     df["precip_category"] = df["precipitation"].apply(categorize_precipitation)
     df["wind_category"] = df["wind_gusts_max"].apply(categorize_wind)
@@ -109,7 +105,7 @@ def run_gold():
     df = load_silver()
     df = add_features(df)
 
-    df.to_csv("data/gold/weather_risk.csv", index=False)
+    df.to_csv("data/gold/weather_risk.csv", index=False, encoding="utf-8")
     print(f"Gold terminee : {len(df)} lignes.")
     print(f"Repartition des niveaux de risque :\n{df['risk_category'].value_counts()}")
 
@@ -118,5 +114,16 @@ def run_gold():
 
 if __name__ == "__main__":
     df = run_gold()
-    print(df[["city", "date", "temperature_max", "precipitation",
-              "wind_gusts_max", "risk_score", "risk_category"]].head(10))
+    print(
+        df[
+            [
+                "city",
+                "date",
+                "temperature_max",
+                "precipitation",
+                "wind_gusts_max",
+                "risk_score",
+                "risk_category",
+            ]
+        ].head(10)
+    )

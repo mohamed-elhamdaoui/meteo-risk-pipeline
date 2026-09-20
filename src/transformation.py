@@ -88,7 +88,7 @@ def run_transformation():
     df = clean_data(df)
     df = reorder_columns(df)
 
-    df.to_csv("data/silver/weather_clean.csv", index=False)
+    df.to_csv("data/silver/weather_clean.csv", index=False, encoding="utf-8")
     print(f"Silver terminee : {len(df)} lignes, {df['city'].nunique()} villes.")
 
     return df
