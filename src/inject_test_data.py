@@ -12,7 +12,7 @@ A SUPPRIMER avant le rendu final du projet (voir clean_test_data() en bas).
 """
 
 import os
-from datetime import date, timedelta
+from datetime import UTC, datetime, timedelta
 
 import psycopg2
 from dotenv import load_dotenv
@@ -29,7 +29,7 @@ DB_CONFIG = {
 
 # Date fictive, hors de la fenetre reelle des 7 jours, pour ne jamais entrer
 # en conflit avec une vraie prevision lors des prochains runs du pipeline
-TEST_DATE = date.today() + timedelta(days=99)
+TEST_DATE = datetime.now(tz=UTC).date() + timedelta(days=99)
 
 # Scenarios synthetiques : (ville existante, temp_max, precip, vent_rafales)
 TEST_SCENARIOS = [
