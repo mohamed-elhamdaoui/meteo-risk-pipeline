@@ -1,8 +1,20 @@
-import os
+"""
+Script de TEST uniquement - injecte des previsions synthetiques a risque
+eleve/critique pour verifier que le dashboard Streamlit affiche bien tous
+les cas (Faible/Modere/Eleve/Critique).
 
-import pandas as pd
+Ne touche PAS aux fichiers Bronze/Silver/Gold (qui doivent rester intacts).
+Insere directement dans PostgreSQL, sur des villes EXISTANTES, a des dates
+qui n'entrent pas en conflit avec les vraies previsions (on utilise le 8eme
+jour, hors de la fenetre normale de 7 jours d'Open-Meteo).
+
+A SUPPRIMER avant le rendu final du projet (voir clean_test_data() en bas).
+"""
+
+import os
+from datetime import date, timedelta
+
 import psycopg2
-import streamlit as st
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -15,146 +27,112 @@ DB_CONFIG = {
     "password": os.getenv("DB_PASSWORD"),
 }
 
+# Date fictive, hors de la fenetre reelle des 7 jours, pour ne jamais entrer
+# en conflit avec une vraie prevision lors des prochains runs du pipeline
+TEST_DATE = date.today() + timedelta(days=99)
 
-@st.cache_data(ttl=300)
-def load_data():
-    """Charge toutes les previsions jointes aux villes depuis PostgreSQL."""
+# Scenarios synthetiques : (ville existante, temp_max, precip, vent_rafales)
+TEST_SCENARIOS = [
+    ("Agadir", 46.0, 55.0, 85.0),       # combinaison extreme -> risque Critique
+    ("Essaouira", 32.0, 60.0, 95.0),    # pluie + vent extremes -> risque Critique
+    ("Marrakech", 44.0, 20.0, 40.0),    # chaleur dominante -> risque Modere/Eleve
+    ("Tangier", 26.0, 45.0, 70.0),      # pluie + vent forts -> risque Eleve
+    ("Rabat", 28.0, 8.0, 25.0),         # tout normal -> risque Faible (temoin)
+]
+
+
+def linear_score(value, low, high):
+    if value <= low:
+        return 0
+    if value >= high:
+        return 100
+    return (value - low) / (high - low) * 100
+
+
+def compute_risk(temp_max, precip, wind_gusts):
+    temp_score = linear_score(temp_max, low=30, high=45)
+    precip_score = linear_score(precip, low=1, high=50)
+    wind_score = linear_score(wind_gusts, low=30, high=90)
+    score = precip_score * 0.40 + wind_score * 0.35 + temp_score * 0.25
+    return round(score, 1)
+
+
+def categorize_risk(score):
+    if score < 30:
+        return "Faible"
+    elif score < 60:
+        return "Modere"
+    elif score < 80:
+        return "Eleve"
+    else:
+        return "Critique"
+
+
+def inject_test_data():
     conn = psycopg2.connect(**DB_CONFIG)
     conn.set_client_encoding("UTF8")
 
-    query = """
-        SELECT
-            c.city_name,
-            c.lat,
-            c.lng,
-            wf.forecast_date,
-            wf.temperature_max,
-            wf.temperature_min,
-            wf.precipitation,
-            wf.wind_gusts_max,
-            wf.risk_score,
-            wf.risk_category
-        FROM weather_forecasts wf
-        JOIN cities c ON c.city_id = wf.city_id;
-    """
-    df = pd.read_sql(query, conn)
+    with conn.cursor() as cur:
+        for city_name, temp_max, precip, wind_gusts in TEST_SCENARIOS:
+            cur.execute("SELECT city_id FROM cities WHERE city_name = %s;", (city_name,))
+            result = cur.fetchone()
+
+            if result is None:
+                print(f"Ville '{city_name}' introuvable, scenario ignore.")
+                continue
+
+            city_id = result[0]
+            risk_score = compute_risk(temp_max, precip, wind_gusts)
+            risk_category = categorize_risk(risk_score)
+
+            cur.execute(
+                """
+                INSERT INTO weather_forecasts (
+                    city_id, forecast_date,
+                    temperature_max, temperature_min,
+                    precipitation, precipitation_probability,
+                    wind_speed_max, wind_gusts_max, weather_code,
+                    temp_category, precip_category, wind_category,
+                    risk_score, risk_category
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (city_id, forecast_date) DO UPDATE SET
+                    temperature_max = EXCLUDED.temperature_max,
+                    precipitation = EXCLUDED.precipitation,
+                    wind_gusts_max = EXCLUDED.wind_gusts_max,
+                    risk_score = EXCLUDED.risk_score,
+                    risk_category = EXCLUDED.risk_category;
+                """,
+                (
+                    city_id, TEST_DATE,
+                    temp_max, temp_max - 8,
+                    precip, 80,
+                    wind_gusts * 0.7, wind_gusts, 3,
+                    "TEST", "TEST", "TEST",
+                    risk_score, risk_category,
+                ),
+            )
+            print(f"{city_name} : risk_score={risk_score} -> {risk_category}")
+
+    conn.commit()
     conn.close()
-    return df
+    print(f"\nDonnees de test injectees a la date fictive {TEST_DATE}.")
 
 
-def main():
-    st.set_page_config(page_title="Meteo Risk Dashboard", layout="wide")
-    st.title("🌦️ Dashboard Risque Meteo - Maroc")
-
-    df = load_data()
-
-    # ---- Filtres (barre laterale) ----
-    st.sidebar.header("Filtres")
-
-    villes = sorted(df["city_name"].unique())
-    villes_selectionnees = st.sidebar.multiselect(
-        "Ville(s)", options=villes, default=[]
-    )
-
-    date_min = df["forecast_date"].min()
-    date_max = df["forecast_date"].max()
-    plage_dates = st.sidebar.date_input(
-        "Periode", value=(date_min, date_max), min_value=date_min, max_value=date_max
-    )
-
-    niveaux_risque = ["Faible", "Modere", "Eleve", "Critique"]
-    niveaux_selectionnes = st.sidebar.multiselect(
-        "Niveau de risque", options=niveaux_risque, default=niveaux_risque
-    )
-
-    # ---- Application des filtres ----
-    df_filtre = df.copy()
-
-    if villes_selectionnees:
-        df_filtre = df_filtre[df_filtre["city_name"].isin(villes_selectionnees)]
-
-    if isinstance(plage_dates, tuple) and len(plage_dates) == 2:
-        df_filtre = df_filtre[
-            (df_filtre["forecast_date"] >= pd.to_datetime(plage_dates[0]))
-            & (df_filtre["forecast_date"] <= pd.to_datetime(plage_dates[1]))
-        ]
-
-    if niveaux_selectionnes:
-        df_filtre = df_filtre[df_filtre["risk_category"].isin(niveaux_selectionnes)]
-
-    if df_filtre.empty:
-        st.warning("Aucune donnee ne correspond aux filtres selectionnes.")
-        return
-
-    # ---- KPI (calcules sur les donnees FILTREES) ----
-    col1, col2, col3, col4, col5 = st.columns(5)
-
-    col1.metric("Nombre de villes", df_filtre["city_name"].nunique())
-    col2.metric("Temperature max", f"{df_filtre['temperature_max'].max():.1f} °C")
-    col3.metric("Precipitation max", f"{df_filtre['precipitation'].max():.1f} mm")
-
-    nb_risque = df_filtre[df_filtre["risk_category"].isin(["Eleve", "Critique"])].shape[0]
-    col4.metric("Periodes a risque (Eleve/Critique)", nb_risque)
-
-    ville_plus_risquee = df_filtre.loc[df_filtre["risk_score"].idxmax(), "city_name"]
-    col5.metric("Ville la plus a risque", ville_plus_risquee)
-
-    st.divider()
-
-    # ---- Carte des villes, coloree par niveau de risque ----
-    st.subheader("Carte du risque par ville")
-
-    couleurs_risque = {
-        "Faible": [46, 204, 113],
-        "Modere": [241, 196, 15],
-        "Eleve": [230, 126, 34],
-        "Critique": [231, 76, 60],
-    }
-    df_carte = df_filtre.copy()
-    df_carte["couleur"] = df_carte["risk_category"].map(couleurs_risque)
-
-    st.map(
-        df_carte.rename(columns={"lat": "latitude", "lng": "longitude"}),
-        latitude="latitude",
-        longitude="longitude",
-        color="couleur",
-        size=20000,
-    )
-
-    # ---- Graphique : evolution de la temperature par ville ----
-    st.subheader("Evolution de la temperature max")
-
-    if villes_selectionnees:
-        df_temp = df_filtre.pivot_table(
-            index="forecast_date", columns="city_name", values="temperature_max"
+def clean_test_data():
+    """Supprime les donnees de test avant le rendu final du projet."""
+    conn = psycopg2.connect(**DB_CONFIG)
+    with conn.cursor() as cur:
+        cur.execute(
+            "DELETE FROM weather_forecasts WHERE forecast_date = %s;",
+            (TEST_DATE,),
         )
-        st.line_chart(df_temp)
-    else:
-        st.info("Selectionne une ou plusieurs villes dans les filtres pour voir le detail par ville.")
-
-    # ---- Top villes les plus a risque ----
-    st.subheader("Top 10 villes les plus a risque (score moyen)")
-    top_risque = (
-        df_filtre.groupby("city_name")["risk_score"]
-        .mean()
-        .sort_values(ascending=False)
-        .head(10)
-    )
-    st.bar_chart(top_risque)
-
-    st.divider()
-
-    # ---- Tableau detaille ----
-    st.subheader("Donnees detaillees")
-    st.dataframe(
-        df_filtre[
-            [
-                "city_name", "forecast_date", "temperature_max", "temperature_min",
-                "precipitation", "wind_gusts_max", "risk_score", "risk_category",
-            ]
-        ].sort_values("risk_score", ascending=False)
-    )
+    conn.commit()
+    conn.close()
+    print("Donnees de test supprimees.")
 
 
 if __name__ == "__main__":
-    main()
+    inject_test_data()
+    # Pour nettoyer plus tard, commente la ligne au-dessus et decommente celle-ci :
+    # clean_test_data()
