@@ -39,6 +39,7 @@ def load_data():
     """
     df = pd.read_sql(query, conn)
     conn.close()
+    df["forecast_date"] = pd.to_datetime(df["forecast_date"])
     return df
 
 
