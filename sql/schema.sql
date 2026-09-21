@@ -38,29 +38,3 @@ CREATE TABLE IF NOT EXISTS weather_forecasts (
 -- Index pour accelerer les requetes frequentes (filtrage par date, tri par risque)
 CREATE INDEX IF NOT EXISTS idx_forecasts_date ON weather_forecasts(forecast_date);
 CREATE INDEX IF NOT EXISTS idx_forecasts_risk ON weather_forecasts(risk_score DESC);
-
-
-
-SELECT current_database();
-
--- DROP TABLE cities;
-
-SELECT * from cities
-
-TRUNCATE TABLE weather_forecasts, cities RESTART IDENTITY CASCADE;
-
-
-SELECT city_name FROM cities WHERE city_name LIKE 'F%s';
-
-
-SELECT city_name FROM cities WHERE city_name LIKE 'F%s';
-
-
-SELECT encode(city_name::bytea, 'hex') 
-FROM cities 
-WHERE city_name LIKE 'F%s' 
-LIMIT 1;
-
-
-SELECT city_name FROM cities WHERE city_name LIKE 'F%s';
-SELECT COUNT(*) FROM cities;
