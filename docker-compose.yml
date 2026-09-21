@@ -1,0 +1,63 @@
+services:
+
+  postgres:
+    image: postgres:16
+    container_name: meteo_postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: meteo_risk_db
+    ports:
+      - "5433:5432"   # 5433 cote machine, pour ne pas entrer en conflit avec ton PostgreSQL local (5432)
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  airflow:
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
+    container_name: meteo_airflow
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: meteo_risk_db
+      DB_USER: postgres
+      DB_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "8080:8080"   # interface web Airflow
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./src:/opt/airflow/src
+      - ./data:/opt/airflow/data
+    working_dir: /opt/airflow
+    command: standalone
+
+  streamlit:
+    build:
+      context: .
+      dockerfile: Dockerfile.streamlit
+    container_name: meteo_streamlit
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: meteo_risk_db
+      DB_USER: postgres
+      DB_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "8501:8501"
+
+volumes:
+  postgres_data:
